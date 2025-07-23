@@ -46,7 +46,12 @@ def build_faiss_index(chunks):
 # === LOAD DOCUMENTS AND BUILD INDEX ===
 print("Loading documents and building vector index...")
 chunks = load_and_chunk_pdfs(DATA_FOLDER, CHUNK_SIZE)
+
+if not chunks:
+    raise ValueError("❌ No text chunks extracted from PDFs. Please check your files.")
+
 faiss_index, embeddings = build_faiss_index(chunks)
+
 print(f"Loaded {len(chunks)} chunks.")
 
 # === RAG QA ENDPOINT ===
