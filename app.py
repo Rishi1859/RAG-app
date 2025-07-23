@@ -20,18 +20,13 @@ def load_and_chunk_pdfs(folder_path, chunk_size=300):
     chunks = []
     for filename in os.listdir(folder_path):
         if filename.endswith(".pdf"):
-            file_path = os.path.join(folder_path, filename)
-            try:
-                reader = PdfReader(file_path)
-                full_text = "\n".join([p.extract_text() for p in reader.pages if p.extract_text()])
-                for i in range(0, len(full_text), chunk_size):
-                    chunk = full_text[i:i+chunk_size].strip()
-                    if chunk:
-                        chunks.append(chunk)
-            except Exception as e:
-                print(f"⚠️ Skipping file {filename}: {e}")
+            reader = PdfReader(os.path.join(folder_path, filename))
+            full_text = "\n".join([p.extract_text() for p in reader.pages if p.extract_text()])
+            for i in range(0, len(full_text), chunk_size):
+                chunk = full_text[i:i+chunk_size].strip()
+                if chunk:
+                    chunks.append(chunk)
     return chunks
-
 
 # === EMBEDDING & FAISS INDEX ===
 def embed_texts(texts):
@@ -46,12 +41,7 @@ def build_faiss_index(chunks):
 # === LOAD DOCUMENTS AND BUILD INDEX ===
 print("Loading documents and building vector index...")
 chunks = load_and_chunk_pdfs(DATA_FOLDER, CHUNK_SIZE)
-
-if not chunks:
-    raise ValueError("❌ No text chunks extracted from PDFs. Please check your files.")
-
 faiss_index, embeddings = build_faiss_index(chunks)
-
 print(f"Loaded {len(chunks)} chunks.")
 
 # === RAG QA ENDPOINT ===
