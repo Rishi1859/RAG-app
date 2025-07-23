@@ -20,13 +20,18 @@ def load_and_chunk_pdfs(folder_path, chunk_size=300):
     chunks = []
     for filename in os.listdir(folder_path):
         if filename.endswith(".pdf"):
-            reader = PdfReader(os.path.join(folder_path, filename))
-            full_text = "\n".join([p.extract_text() for p in reader.pages if p.extract_text()])
-            for i in range(0, len(full_text), chunk_size):
-                chunk = full_text[i:i+chunk_size].strip()
-                if chunk:
-                    chunks.append(chunk)
+            file_path = os.path.join(folder_path, filename)
+            try:
+                reader = PdfReader(file_path)
+                full_text = "\n".join([p.extract_text() for p in reader.pages if p.extract_text()])
+                for i in range(0, len(full_text), chunk_size):
+                    chunk = full_text[i:i+chunk_size].strip()
+                    if chunk:
+                        chunks.append(chunk)
+            except Exception as e:
+                print(f"⚠️ Skipping file {filename}: {e}")
     return chunks
+
 
 # === EMBEDDING & FAISS INDEX ===
 def embed_texts(texts):
