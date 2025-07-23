@@ -53,9 +53,7 @@ def generate_answer(context, question):
 # Streamlit UI
 st.title("📚 RAG Q&A Chatbot")
 question = st.text_input("Ask a question about your documents:")
-
-# Process only when a question is asked
-if question:
+if st.button("Submit") and question.strip():
     try:
         chunks = load_and_chunk_pdfs(DATA_FOLDER, CHUNK_SIZE)
         if not chunks:
