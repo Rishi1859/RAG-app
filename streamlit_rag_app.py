@@ -1,83 +1,70 @@
-
 import os
-import numpy as np
 import faiss
-import openai
+import numpy as np
 import streamlit as st
 from PyPDF2 import PdfReader
 from sentence_transformers import SentenceTransformer
+from transformers import pipeline
 
-# === CONFIG ===
-openai.api_key = os.getenv("OPENAI_API_KEY")
-DATA_FOLDER = "data"
-CHUNK_SIZE = 300
-TOP_K = 3
+# Constants
+DATA_FOLDER = "docs"
+CHUNK_SIZE = 500
+EMBEDDING_MODEL = 'all-MiniLM-L6-v2'
+GENERATION_MODEL = "tiiuae/falcon-7b-instruct"  # or use OpenAI, Claude, etc.
 
-# === INIT ===
-st.set_page_config(page_title="RAG Q&A Chatbot", layout="wide")
-st.title("📄 RAG Document Q&A Chatbot")
+# Load embedding model
+embed_model = SentenceTransformer(EMBEDDING_MODEL)
 
-@st.cache_resource
-def load_embedder():
-    return SentenceTransformer('all-MiniLM-L6-v2')
-
-embed_model = load_embedder()
-
-# === UTILS ===
-def load_and_chunk_pdfs(folder_path, chunk_size=300):
+# Function to load and split PDFs into chunks
+def load_and_chunk_pdfs(folder_path, chunk_size):
     chunks = []
     for filename in os.listdir(folder_path):
         if filename.endswith(".pdf"):
-            file_path = os.path.join(folder_path, filename)
-            try:
-                reader = PdfReader(file_path)
-                full_text = "\n".join([p.extract_text() for p in reader.pages if p.extract_text()])
-                for i in range(0, len(full_text), chunk_size):
-                    chunk = full_text[i:i+chunk_size].strip()
-                    if chunk:
-                        chunks.append(chunk)
-            except Exception as e:
-                st.warning(f"⚠️ Skipping {filename}: {e}")
+            reader = PdfReader(os.path.join(folder_path, filename))
+            for page in reader.pages:
+                text = page.extract_text()
+                if text:
+                    for i in range(0, len(text), chunk_size):
+                        chunks.append(text[i:i+chunk_size])
     return chunks
 
-def embed_texts(texts):
-    return embed_model.encode(texts, convert_to_tensor=False)
-
+# Create FAISS index from chunks
 def build_faiss_index(chunks):
     embeddings = embed_model.encode(chunks)
-    embeddings = np.array(embeddings).astype("float32")  # ✅ Convert to NumPy array
-    index = faiss.IndexFlatL2(embeddings.shape[1])       # ✅ Use .shape instead of len
+    embeddings = np.array(embeddings).astype('float32')
+    index = faiss.IndexFlatL2(embeddings.shape[1])
     index.add(embeddings)
     return index, embeddings
 
+# Find top relevant chunks
+def retrieve_top_chunks(question, chunks, embeddings, k=3):
+    question_embedding = embed_model.encode([question])
+    question_embedding = np.array(question_embedding).astype('float32')
+    distances, indices = faiss_index.search(question_embedding, k)
+    return [chunks[i] for i in indices[0]]
 
-# === LOAD DOCS ===
-os.makedirs(DATA_FOLDER, exist_ok=True)
-chunks = load_and_chunk_pdfs(DATA_FOLDER, CHUNK_SIZE)
+# Generate answer using a local or cloud model
+def generate_answer(context, question):
+    generator = pipeline("text-generation", model=GENERATION_MODEL)
+    prompt = f"Context: {context}\nQuestion: {question}\nAnswer:"
+    result = generator(prompt, max_length=300, do_sample=True)[0]['generated_text']
+    return result.split("Answer:")[-1].strip()
 
-if not chunks:
-    st.error("❌ No valid PDF chunks found. Please add readable PDF files to the 'data/' folder.")
-    st.stop()
+# Streamlit UI
+st.title("📚 RAG Q&A Chatbot")
+question = st.text_input("Ask a question about your documents:")
 
-faiss_index, embeddings = build_faiss_index(chunks)
-
-# === USER INPUT ===
-question = st.text_input("Ask a question based on your uploaded documents:")
-
-if st.button("Ask") and question.strip():
+# Process only when a question is asked
+if question:
     try:
-        q_embed = embed_texts([question])[0]
-        D, I = faiss_index.search([q_embed], k=TOP_K)
-        context = "\n---\n".join([chunks[i] for i in I[0]])
-
-        prompt = f"Answer the question using the context:\n{context}\n\nQuestion: {question}\nAnswer:"
-        with st.spinner("Thinking..."):
-            response = openai.ChatCompletion.create(
-                model="gpt-3.5-turbo",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.3,
-                max_tokens=300
-            )
-            st.success(response.choices[0].message.content.strip())
+        chunks = load_and_chunk_pdfs(DATA_FOLDER, CHUNK_SIZE)
+        if not chunks:
+            st.error("No text chunks found. Ensure your PDFs have extractable text.")
+        else:
+            faiss_index, embeddings = build_faiss_index(chunks)
+            top_chunks = retrieve_top_chunks(question, chunks, embeddings)
+            context = "\n".join(top_chunks)
+            answer = generate_answer(context, question)
+            st.success(answer)
     except Exception as e:
         st.error(f"❌ Error: {e}")
