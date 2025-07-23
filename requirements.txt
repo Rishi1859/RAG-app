@@ -1,7 +1,6 @@
-pandas
 streamlit
-openai
-faiss-cpu
-sentence-transformers
-langchain
-embeddings
+pandas
+numpy
+plotly
+scikit-learn
+openpyxl
