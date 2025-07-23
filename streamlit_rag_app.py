@@ -1,5 +1,6 @@
 
 import os
+import numpy as np
 import faiss
 import openai
 import streamlit as st
@@ -43,10 +44,12 @@ def embed_texts(texts):
     return embed_model.encode(texts, convert_to_tensor=False)
 
 def build_faiss_index(chunks):
-    embeddings = embed_texts(chunks)
-    index = faiss.IndexFlatL2(len(embeddings[0]))
+    embeddings = embed_model.encode(chunks)
+    embeddings = np.array(embeddings).astype("float32")  # ✅ Convert to NumPy array
+    index = faiss.IndexFlatL2(embeddings.shape[1])       # ✅ Use .shape instead of len
     index.add(embeddings)
     return index, embeddings
+
 
 # === LOAD DOCS ===
 os.makedirs(DATA_FOLDER, exist_ok=True)
