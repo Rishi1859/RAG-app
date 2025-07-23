@@ -1,66 +1,37 @@
+from flask import Flask, request, jsonify
+from utils import load_and_chunk_docs, build_faiss_index, embed_documents
+import faiss
+import openai
 import os
-import streamlit as st
-from langchain.document_loaders import TextLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.vectorstores import FAISS
-from langchain.embeddings import HuggingFaceEmbeddings
-from langchain.llms import OpenAI
-from langchain.chains import RetrievalQA
-from langchain.prompts import PromptTemplate
 
-# Set your OpenAI key if using OpenAI API
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY") or "YOUR_API_KEY"
+openai.api_key = os.getenv("OPENAI_API_KEY")  # or use Claude/Gemini key
 
-def load_docs(uploaded_file):
-    path = f"temp_{uploaded_file.name}"
-    with open(path, "wb") as f:
-        f.write(uploaded_file.getvalue())
-    loader = TextLoader(path)
-    return loader.load()
+app = Flask(__name__)
 
-def create_vector_store(docs):
-    splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
-    chunks = splitter.split_documents(docs)
-    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
-    return FAISS.from_documents(chunks, embeddings)
+# Step 1: Load and embed documents
+chunks = load_and_chunk_docs("data")
+index, embeddings = build_faiss_index(chunks)
 
-def create_rag_chain(vectorstore):
-    retriever = vectorstore.as_retriever(search_type="similarity", k=3)
-    llm = OpenAI(openai_api_key=OPENAI_API_KEY, temperature=0.3)
+@app.route("/ask", methods=["POST"])
+def ask():
+    query = request.json["question"]
+    query_embedding = embed_documents([query])[0]
     
-    prompt = PromptTemplate.from_template(
-        "Answer the question using the below context:\n{context}\n\nQuestion: {question}"
+    # Step 2: Retrieve top-k documents
+    D, I = index.search([query_embedding], k=3)
+    context = "\n".join([chunks[i] for i in I[0]])
+
+    # Step 3: Generate answer using OpenAI (or Claude/Gemini if available)
+    prompt = f"""Answer the question based on the following context:\n{context}\n\nQuestion: {query}\nAnswer:"""
+    
+    response = openai.ChatCompletion.create(
+        model="gpt-3.5-turbo",  # or use GPT-4 if available
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.5,
+        max_tokens=300
     )
-    qa_chain = RetrievalQA.from_chain_type(
-        llm=llm,
-        retriever=retriever,
-        return_source_documents=True,
-        chain_type_kwargs={"prompt": prompt}
-    )
-    return qa_chain
 
-# Streamlit UI
-st.set_page_config(page_title="📚 RAG Q&A Chatbot", layout="wide")
-st.title("📚 RAG Q&A Chatbot")
+    return jsonify({"answer": response.choices[0].message.content.strip()})
 
-uploaded_file = st.file_uploader("Upload a document (TXT or PDF)", type=["txt", "pdf"])
-
-if uploaded_file:
-    with st.spinner("Processing document..."):
-        docs = load_docs(uploaded_file)
-        vectorstore = create_vector_store(docs)
-        qa_chain = create_rag_chain(vectorstore)
-    st.success("Document indexed successfully! Ask your question below.")
-
-    question = st.text_input("Ask a question about the document:")
-    if question:
-        with st.spinner("Generating answer..."):
-            result = qa_chain({"query": question})
-            st.markdown("### 🧠 Answer:")
-            st.markdown(result["result"])
-            with st.expander("🔍 Sources"):
-                for doc in result["source_documents"]:
-                    st.markdown(f"• {doc.page_content[:300]}...")
-
-else:
-    st.info("Please upload a document to get started.")
+if __name__ == "__main__":
+    app.run(debug=True)
